@@ -16,38 +16,39 @@ int main (int argc, char **argv)
 	char *separator = " \t\n";
 	
 	
+	
 	arguments = (char **) malloc (MSIZ * sizeof(char *));
 	fprintf(stderr,"%s",prompt);
 	line = (char *) malloc(MSIZ * sizeof(char));
 	
 	
 	
-	fgets(line, MSIZ-1, stdin);
-	
-	token = strtok (line, separator);
-	i = 0;
-	arguments[i++] = token;
-	while (token != NULL)
+	while(fgets(line, MSIZ-1, stdin) != NULL);
 	{
-		token = strtok (NULL, separator);
+		token = strtok (line, separator);
+		i = 0;
 		arguments[i++] = token;
-	} 
-	arguments [i] = NULL;
-	
-	switch (pid = fork())
-	{
-		case 0:
-			execvp(arguments[0], arguments);
-			fprintf(stderr, "ERROR %s no such program!\n", line);
-			exit(1);
-		case -1:
-			fprintf(stderr,"ERROR can't create child process!\n");   /* unlikely but possible if hit a limit */
-               		break;
-               		
-               	default:
-               		wait();
+		while (token != NULL)
+		{
+			token = strtok (NULL, separator);
+			arguments[i++] = token;
+		} 
+		arguments [i] = NULL;
+		
+		switch (pid = fork())
+		{
+			case 0:
+				execvp(arguments[0], arguments);
+				fprintf(stderr, "ERROR %s no such program!\n", line);
+				exit(1);
+			case -1:
+				fprintf(stderr,"ERROR can't create child process!\n");   /* unlikely but possible if hit a limit */
+	               		break;
+	               		
+	               	default:
+	               		wait();
+		}
 	}
-	
 	
 	
 	
