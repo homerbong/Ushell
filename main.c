@@ -15,7 +15,17 @@ int main (int argc, char **argv)
 	char *token, *line;
 	char *separator = " \t\n";
 	
-	
+	if(argc != 1)
+	{
+		if(chdir(argv[1]) == -1)
+		{
+			printf("There is no such directory as %s, you will be redirected to home!\n", argv[1]);
+			chdir(getenv("HOME"));
+		}
+	}
+	else
+		chdir(getenv("HOME"));
+		
 	
 	arguments = (char **) malloc (MSIZ * sizeof(char *));
 	if(arguments == NULL)
