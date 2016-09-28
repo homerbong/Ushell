@@ -122,7 +122,7 @@ int main (int argc, char **argv)
 		               		break;
 		               		
 		               	default:
-		               		
+		               		//Waits for all the children to terminate.
 		               		while(child_pid = wait(NULL) != -1);
 		               		if(errno != ECHILD)
 		               		{
