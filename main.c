@@ -9,14 +9,14 @@
 
 #define MSIZ 81
 
-void redirect(char *fname, int inred, int outred);
-int chkred(char *token, int *inred, int *outred);
+void redirect(char **fname, int inred, int outred, int append);
+int chkred(char *token, int *inred, int *outred, int *append);
 
 int main (int argc, char **argv)
 {
-	int pid, child_pid, i, inred, outred, save_in, save_out;
+	int pid, child_pid, i, inred, outred, save_in, save_out, append;
 	char **arguments;
-	char *token, *line, *fname;
+	char *token, *line, **fname;
 	char *separator = " \t\n";
 	
 	if(argc != 1)                 //Checks if there is a directory from which to start the shell.
@@ -50,6 +50,13 @@ int main (int argc, char **argv)
 		exit(102);
 	}
 	
+	fname = (char **) malloc(3 * sizeof(char*));
+	if (fname == NULL)
+	{
+		printf("ERROR 102 while allocating memory!\n");
+		exit(103);
+	}
+	
 	
 	//Duplicates of the standard input and output file descriptors. They are used to restore the shell to the initial after a redirection was made.
 	save_in = dup(STDIN_FILENO);
@@ -60,24 +67,49 @@ int main (int argc, char **argv)
 	{
 		//The input is tokenized and progressively processed in order to execute a command.
 		token = strtok (line, separator);
-		i = inred = outred = 0;
+		i = inred = outred = append = 0;
 		arguments[i++] = token;
 		while (token != NULL)
 		{
 			token = strtok (NULL, separator);
-			//Controls if there is a IO redirection request in command. If one "<" or ">" is found in the command then one of the two corresponding flags are consequently set.
-			if(chkred(token, &inred, &outred))
+			//Controls if there is a IO redirection request in command. If one "<", ">" or ">>" is found in the command then one of the three corresponding flags are consequently set.
+			switch(chkred(token, &inred, &outred, &append))
 			{
-				fname = strtok(NULL, separator);
-				if(fname == NULL)
+				case 1:
 				{
-					printf("ERROR while saving the path for redirecting!\n");
-					exit(106);
+					fname[0] = strtok (NULL, separator);
+					if(fname[0] == NULL)
+					{
+						printf("ERROR while saving the path for redirection\n");
+						exit(141);
+					}
+					break;
 				}
+				case 2:
+				{
+					fname[1] = strtok (NULL, separator);
+					if(fname[1] == NULL)
+					{
+						printf("ERROR while saving the path for redirection\n");
+						exit(141);
+					}
+					break;
+				}
+				case 3:
+				{
+					fname[2] = strtok (NULL, separator);
+					if(fname[2] == NULL)
+					{
+						printf("ERROR while saving the path for redirection\n");
+						exit(141);
+					}
+					break;
+				}
+				default:
+					arguments[i++] = token;
 				
-			}
-			else
-				arguments[i++] = token;
+				
+			}	
 		} 
 		arguments [i] = NULL;
 		
@@ -106,8 +138,8 @@ int main (int argc, char **argv)
 		else
 		{
 			//checking if the IO redirecting flags are set in order to perform the necessary operations.
-			if (inred || outred)
-				redirect(fname, inred, outred);
+			if (inred || outred || append)
+				redirect(fname, inred, outred, append);
 			//Creation of the child process.
 			switch (pid = fork())
 			{
@@ -151,16 +183,16 @@ int main (int argc, char **argv)
 /* This function is responsible of redirecting the input or output of the commands. In the 
 case one of the two flags are set it just opens a new file descriptor and it duplicates the
 ones of standard input and output*/
-void redirect(char *fname, int inred, int outred)
+void redirect(char **fname, int inred, int outred, int append)
 {
 	int newdescriptor;
 	
 	if(inred == 1)
 	{
-		newdescriptor = open (fname, O_RDONLY, 0600);
+		newdescriptor = open (fname[0], O_RDONLY, 0600);
 		if(dup2(newdescriptor, STDIN_FILENO) == -1)
 		{
-			printf("ERROR while redirecting the input");
+			printf("ERROR while redirecting the input\n");
 			exit(110);
 		}
 		close (newdescriptor);
@@ -168,29 +200,50 @@ void redirect(char *fname, int inred, int outred)
 	
 	if(outred == 1)
 	{
-		newdescriptor = open(fname,O_WRONLY|O_CREAT|O_TRUNC, 0600);
+		newdescriptor = open(fname[1],O_WRONLY|O_CREAT|O_TRUNC, 0600);
 		if(dup2(newdescriptor, STDOUT_FILENO) == -1)
 		{
-			printf("ERROR while redirecting the input");
-			exit(110);
+			printf("ERROR while redirecting the output\n");
+			exit(111);
 		}
 		close(newdescriptor);
 	}
 	
+	if(append == 1)
+	{
+		newdescriptor = open(fname[2],O_WRONLY|O_APPEND);
+		if(dup2(newdescriptor, STDOUT_FILENO) == -1)
+		{
+			printf("ERROR while redirecting the output(append)\n");
+			exit(112);
+		}
+		close(newdescriptor);
+	}
 	
 }
 
 //It just compares the tokens with the corresponding characters and sets the values of the redirection flags.
-int chkred(char *token, int *inred, int *outred)
+int chkred(char *token, int *inred, int *outred, int *append)
 {
 	
 	if(token == NULL)
 		return 0;
 	
 	else if(strcmp(token, "<") == 0)
+	{
 		*inred = 1;
+		return 1;
+	}
 	else if(strcmp (token, ">") == 0)
+	{
 		*outred = 1;
+		return 2;
+	}
+	else if(strcmp(token, ">>") == 0)
+	{
+		*append = 1;
+		return 3;
+	}
 	
-	return (*inred || *outred);
+	return 0;
 }
