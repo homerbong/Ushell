@@ -8,16 +8,22 @@
 #include <fcntl.h>
 
 #define MSIZ 81
+#define LSZ 10
 
 void redirect(char **fname, int inred, int outred, int append);
 int chkred(char *token, int *inred, int *outred, int *append);
+int chkbuiltin(char **arguments);
+void tokenize(char ** arguments, char **fname,char *line, int *inred, int *outred, int *append);
+void memoryalloc(char ***arguments, char **line, char ***fname);
+void launchjob(char **arguments, char *line, char **fname, int inred, int outred, int append);
+void log_update(char *line, char **log, int *n);
+char **logalloc();
 
 int main (int argc, char **argv)
 {
-	int pid, child_pid, i, inred, outred, save_in, save_out, append;
+	int inred, outred, save_in, save_out, append, n=0, i;
 	char **arguments;
-	char *token, *line, **fname;
-	char *separator = " \t\n";
+	char *line, **fname, **log;
 	
 	if(argc != 1)                 //Checks if there is a directory from which to start the shell.
 	{
@@ -33,30 +39,8 @@ int main (int argc, char **argv)
 		exit(103);
 	}
 	
-	
-	
-	arguments = (char **) malloc (MSIZ * sizeof(char *));
-	if(arguments == NULL)
-	{
-		printf("ERROR 101 while allocating memory!\n");
-		exit(101);
-	}
-	
-	
-	line = (char *) malloc(MSIZ * sizeof(char));
-	if(line == NULL)
-	{
-		printf("ERROR 102 while allocating memory!\n");
-		exit(102);
-	}
-	
-	fname = (char **) malloc(3 * sizeof(char*));
-	if (fname == NULL)
-	{
-		printf("ERROR 102 while allocating memory!\n");
-		exit(103);
-	}
-	
+	memoryalloc(&arguments, &line, &fname);
+	log = logalloc();
 	
 	//Duplicates of the standard input and output file descriptors. They are used to restore the shell to the initial after a redirection was made.
 	save_in = dup(STDIN_FILENO);
@@ -65,103 +49,12 @@ int main (int argc, char **argv)
 	fprintf(stdout,"[%s]",getenv("USER"));
 	while(fgets(line, MSIZ-1, stdin) != NULL)
 	{
-		//The input is tokenized and progressively processed in order to execute a command.
-		token = strtok (line, separator);
-		i = inred = outred = append = 0;
-		arguments[i++] = token;
-		while (token != NULL)
+		log_update(line, log, &n);
+		tokenize(arguments, fname, line, &inred, &outred, &append);
+		
+		if(!chkbuiltin(arguments))
 		{
-			token = strtok (NULL, separator);
-			//Controls if there is a IO redirection request in command. If one "<", ">" or ">>" is found in the command then one of the three corresponding flags are consequently set.
-			switch(chkred(token, &inred, &outred, &append))
-			{
-				case 1:
-				{
-					fname[0] = strtok (NULL, separator);
-					if(fname[0] == NULL)
-					{
-						printf("ERROR while saving the path for redirection\n");
-						exit(141);
-					}
-					break;
-				}
-				case 2:
-				{
-					fname[1] = strtok (NULL, separator);
-					if(fname[1] == NULL)
-					{
-						printf("ERROR while saving the path for redirection\n");
-						exit(141);
-					}
-					break;
-				}
-				case 3:
-				{
-					fname[2] = strtok (NULL, separator);
-					if(fname[2] == NULL)
-					{
-						printf("ERROR while saving the path for redirection\n");
-						exit(141);
-					}
-					break;
-				}
-				default:
-					arguments[i++] = token;
-				
-				
-			}	
-		} 
-		arguments [i] = NULL;
-		
-		//checking for builtin commands "cd" and "exit".
-		if(strcmp(arguments[0], "cd") == 0)
-		{
-			if(arguments[1] == NULL)
-			{
-				chdir(getenv("HOME"));
-			}
-			else
-				if(chdir(arguments[1]) == -1)
-				{
-					printf("%s: no such directory\n", arguments[1]);
-				} 
-		}
-		
-		else
-			if(strcmp (arguments[0], "exit") == 0)
-			{
-				exit(0);
-			}
-		
-		
-		
-		else
-		{
-			//checking if the IO redirecting flags are set in order to perform the necessary operations.
-			if (inred || outred || append)
-				redirect(fname, inred, outred, append);
-			//Creation of the child process.
-			switch (pid = fork())
-			{
-				case 0:
-					
-					execvp(arguments[0], arguments);
-					fprintf(stderr, "ERROR %s no such program!\n", line);
-					exit(1);
-				case -1:
-					
-					fprintf(stderr,"ERROR can't create child process!\n");   
-		               		break;
-		               		
-		               	default:
-		               		//Waits for all the children to terminate.
-		               		while(child_pid = wait(NULL) != -1);
-		               		if(errno != ECHILD)
-		               		{
-		               			printf("There has been a problem waiting for the children!\n");
-		               			exit(107);
-		               		}
-			}
+			launchjob(arguments, line, fname, inred, outred, append);
 		}
 		
 		fprintf(stdout,"[%s]",getenv("USER"));
@@ -246,4 +139,205 @@ int chkred(char *token, int *inred, int *outred, int *append)
 	}
 	
 	return 0;
+}
+
+		
+int chkbuiltin(char **arguments)
+{		
+	//checking for builtin commands "cd" and "exit".
+	if(strcmp(arguments[0], "cd") == 0)
+	{
+		if(arguments[1] == NULL)
+		{
+			chdir(getenv("HOME"));
+		}
+		else
+			if(chdir(arguments[1]) == -1)
+			{
+				printf("%s: no such directory\n", arguments[1]);
+			}
+		return 1;
+	}
+	
+	else
+		if(strcmp (arguments[0], "exit") == 0)
+		{
+			exit(0);
+		}
+	
+	return 0;
+}
+
+
+void tokenize(char **arguments, char **fname, char *line, int *inred, int *outred, int *append)
+{
+	//The input is tokenized and progressively processed in order to execute a command.
+	int i;
+	char *token;
+	char *separator = " \t\n";
+	token = strtok (line, separator);
+	i = *inred = *outred = *append = 0;
+	arguments[i++] = token;
+	while (token != NULL)
+	{
+		token = strtok (NULL, separator);
+		//Controls if there is a IO redirection request in command. If one "<", ">" or ">>" is found in the command then one of the three corresponding flags are consequently set.
+		switch(chkred(token, inred, outred, append))
+		{
+			case 1:
+			{
+				fname[0] = strtok (NULL, separator);
+				if(fname[0] == NULL)
+				{
+					printf("ERROR while saving the path for redirection\n");
+					exit(141);
+				}
+				break;
+			}
+			case 2:
+			{
+				fname[1] = strtok (NULL, separator);
+				if(fname[1] == NULL)
+				{
+					printf("ERROR while saving the path for redirection\n");
+					exit(141);
+				}
+				break;
+			}
+			case 3:
+			{
+				fname[2] = strtok (NULL, separator);
+				if(fname[2] == NULL)
+				{
+					printf("ERROR while saving the path for redirection\n");
+					exit(141);
+				}
+				break;
+			}
+			default:
+				arguments[i++] = token;
+			
+			
+		}	
+	} 
+	arguments [i] = NULL;
+	return;
+}
+
+void memoryalloc(char ***arguments, char **line, char ***fname)
+{	
+	int i;
+	*arguments = (char **) malloc (MSIZ * sizeof(char *));
+	if(*arguments == NULL)
+	{
+		printf("ERROR 101 while allocating memory!\n");
+		exit(101);
+	}
+	
+	
+	*line = (char *) malloc(MSIZ * sizeof(char));
+	if(*line == NULL)
+	{
+		printf("ERROR 102 while allocating memory!\n");
+		exit(102);
+	}
+	
+	*fname = (char **) malloc(3 * sizeof(char*));
+	if (*fname == NULL)
+	{
+		printf("ERROR 103 while allocating memory!\n");
+		exit(103);
+	}
+	
+	return;
+}
+
+void launchjob(char **arguments, char *line, char **fname, int inred, int outred, int append)
+{
+	int pid, child_pid;
+	
+	//checking if the IO redirecting flags are set in order to perform the necessary operations.
+	if (inred || outred || append)
+		redirect(fname, inred, outred, append);
+	//Creation of the child process.
+	switch (pid = fork())
+	{
+		case 0:
+			
+			execvp(arguments[0], arguments);
+			fprintf(stderr, "ERROR %s no such program!\n", line);
+			exit(1);
+		case -1:
+			
+			fprintf(stderr,"ERROR can't create child process!\n");   
+               		break;
+               		
+               	default:
+               		//Waits for all the children to terminate.
+               		while(child_pid = wait(NULL) != -1);
+               		if(errno != ECHILD)
+               		{
+               			printf("There has been a problem waiting for the children!\n");
+               			exit(107);
+               		}
+	}
+		
+}
+
+void log_update(char *line, char **log, int *n)
+{
+	FILE *fp;
+	int i = 0;
+	if (strcpy(log[*n%LSZ], line) == NULL)
+	{
+		printf("ERROR while saving the log!\n");
+		exit(1984);
+	}
+	fp = fopen ("/tmp/audit.log", "w");
+	if(fp == NULL)
+	{
+		printf("ERROR while opening the log file!\n");
+		exit(180);
+	}
+	if(*n < LSZ)
+	{
+		for(i=0; i <= *n; i++)
+		{
+			fprintf(fp,"%s", log[i]);
+		}
+	}
+	else
+	{
+		for(i=((*n+1)%LSZ);i != (*n%LSZ) ;i=(i+1)%LSZ)
+		{
+			fprintf(fp,"%s", log[i]);
+		}
+		fprintf(fp,"%s", log[*n%LSZ]);
+	}
+	fclose(fp);
+	(*n)++;
+	return;
+}
+
+char **logalloc()
+{
+	int i;
+	char **tmp;
+	tmp = (char **) malloc(LSZ * sizeof(char*));
+	if(tmp == NULL)
+	{
+		printf("ERROR 104 while allocating memory!\n");
+		exit(104);
+	}
+	
+	for(i=0; i < LSZ; i++)
+	{
+		tmp[i] = (char*) malloc (MSIZ * sizeof(char));
+		if(tmp[i] == NULL)
+		{
+			printf("ERROR 104.%d while allocating memory!\n", i+1);
+			exit(105);
+		}
+	}
+	return tmp;
 }
